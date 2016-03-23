@@ -53,6 +53,9 @@ module.exports = function (server) {
     server.socket.groupId = ownerObject.groupId;
     server.socket.clientId = ownerObject.clientId;
     server.socket.join('owner_group:' + server.socket.groupId);
+    server.socket.join('owner_sessions:' + server.socket.clientId);
+    Client.addSession(server.socket.clientId, server.socket);
+
     send(undefined, ownerObject);
     console.log('Owner client registered. GroupId:', server.socket.groupId);
   });
@@ -61,13 +64,29 @@ module.exports = function (server) {
     var clientId = dataObject.clientId,
         message = dataObject.message;
 
-    emitToCustomMessageUser(clientId, message);
+    emitCustomMessageToUser(clientId, {
+      clientId: server.socket.clientId,
+      message: message,
+    });
+    send(undefined, dataObject);
   });
 
-  function emitToCustomMessageUser (clientId, message) {
+  server.socket.on('disconnect', function () {
+    var socket = server.socket,
+      clientId = server.socket.clientId,
+      grouptId = server.socket.groupId;
+
+    if (clientId) {
+      server.socket.leave('owner_sessions:' + server.socket.clientId);
+      Client.removeSession(clientId, socket);
+    }
+    if (grouptId) {
+      server.socket.leave('owner_group:' + server.socket.groupId);
+    }
+  });
+
+  function emitCustomMessageToUser (clientId, message) {
     server.socket.broadcast.to('user_sessions:' + clientId).emit('custom_message', message);
   }
-
-  server.use
 
 };

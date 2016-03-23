@@ -82,14 +82,37 @@ module.exports = function (server) {
 
   });
 
+  server.use('post:api/owner/custom_message/emit', function (dataObject, send) {
+    var clientId = dataObject.clientId,
+        message = dataObject.message;
+
+    server.socket.emitCustomMessageToOwner(clientId, {
+      clientId: server.socket.clientId,
+      message: message,
+    });
+    send(undefined, dataObject);
+  });
+
+  server.use('post:api/owner_group/custom_message/emit', function (dataObject, send) {
+    var clientId = dataObject.clientId,
+        groupId = server.socket.groupId,
+        message = dataObject.message;
+
+    server.socket.emitCustomMessageToOwnerGroup(groupId, {
+      clientId: clientId,
+      message: message,
+    });
+    send(undefined, dataObject);
+  });
+
   server.use('put:api/model', function (modelObject, send) {
     Model.upsert(modelObject).then(function (modelModel) {
       var socket = server.socket;
       socket.clientId = modelModel.get('clientId');
       socket.groupId = modelModel.get('groupId');
       socket.join('user_group:' + socket.groupId);
+      socket.join('user_sessions:' + socket.clientId);
       Client.addSession(socket.clientId, socket);
-      server.socket.join('user_sessions:' + socket.clientId);
       send(null, modelModel.toObject());
       console.log('User client registered. ClientId:', modelModel.get('clientId'), '\tGroupId:', modelModel.get('groupId'));
     }).catch(function (err) {
@@ -107,14 +130,19 @@ module.exports = function (server) {
 
   server.socket.on('disconnect', function () {
     var socket = server.socket,
+      groupId = socket.groupId,
       clientId = server.socket.clientId;
     if (clientId) {
+      socket.leave('user_sessions:' + socket.clientId);
       Client.removeSession(clientId, socket);
       if (!Client.get(clientId)) {
         setTimeout(function () {
           deleteModel();
         }, clearModelTimeout);
       }
+    }
+    if (groupId) {
+      socket.leave('user_group:' + groupId);
     }
   });
 
@@ -137,6 +165,14 @@ module.exports = function (server) {
 
   server.socket.emitToOwners = function (type, data) {
     server.socket.broadcast.to('owner_group:' + server.socket.groupId).emit(type, data);
+  };
+
+  server.socket.emitCustomMessageToOwner = function (clientId, data) {
+    server.socket.broadcast.to('owner_sessions:' + clientId).emit('custom_message', data);
+  };
+
+  server.socket.emitCustomMessageToOwnerGroup = function (message) {
+    this.emitToOwners('custom_message', message);
   };
 
   function emitChanges (changes) {

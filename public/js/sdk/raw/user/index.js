@@ -15,12 +15,11 @@ var plugin = {
 
 function User (groupId, options) {
   this.options = options || {};
-  this.options.storeKey || (this.options.storeKey = 'realstore-clientid');
+  this.options.storeKey || (this.options.storeKey = 'realstore-user-clientid');
   this.options.storePrefix || (this.options.storePrefix = '');
   this.options.storePostfix || (this.options.storePostfix = '');
   this.options.modelChangeThrottle || (this.options.modelChangeThrottle = 500);
   this._generateStoreKeys();
-  this.clientId = this.getClientId();
   this.model = new Model();
   this.model._changesBufferByAttributeName = {};
   this._attachModelEvents();
@@ -43,6 +42,7 @@ User.prototype.disconnect = function () {
 };
 
 User.prototype._connect = function () {
+  this.clientId = this.getClientId();
   this._client || (this._client = new Client());
   this._socket || (this._socket = io(undefined, {query: 'role=user'}));
   this._client.setSocket(this._socket);
@@ -116,7 +116,19 @@ User.prototype._attachModelEvents = function () {
 };
 
 User.prototype._onCustomMessage = function (dataObject) {
-  this.model.emit('custom_message', dataObject);
+  var self = this,
+      fromClientId = dataObject.clientId,
+      message = dataObject.message;
+  this.model.emit('custom_message', message, function (message) {
+    self._emitCustomMessageToOwner(fromClientId, message);
+  });
+};
+
+User.prototype._emitCustomMessageToOwner = function (clientId, message) {
+  return this._request('post:api/owner/custom_message/emit', {
+    clientId: clientId,
+    message: message,
+  });
 };
 
 User.prototype._onModelChangeThrottled = function (changes) {
@@ -290,7 +302,7 @@ User.prototype._clearAttributes = function () {
 
 User.prototype.getClientId = function () {
   if (!this.clientId) {
-    this.clientId = BrowserStore.getItem(this._storeKeys.clientId);
+    this.clientId = this.options.clientId || BrowserStore.getItem(this._storeKeys.clientId);
     if (!this.clientId) {
       this.clientId = UID.guid();
       this._storeClientId(this.clientId);

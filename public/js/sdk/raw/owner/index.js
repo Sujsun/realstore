@@ -1,5 +1,8 @@
 var $ = require('jquery'),
+    UID = require('../util/uid'),
     Events = require('minivents'),
+    BrowserStore = require('../util/browser-store'),
+
     io = require('socket.io-client'),
     Model = require('model'),
     Client = require('../../../../../utils/socket-http').Client;
@@ -14,10 +17,11 @@ var plugin = {
 function Owner (groupId, options) {
   this.options = options || {};
   this.groupId = groupId;
-  this.options.storeKey || (this.options.storeKey = 'realstore-clientid');
+  this.options.storeKey || (this.options.storeKey = 'realstore-owner-clientid');
   this.options.storePrefix || (this.options.storePrefix = '');
   this.options.storePostfix || (this.options.storePostfix = '');
   this.event = new Events();
+  this._generateStoreKeys();
   this._userModels = {};
 }
 
@@ -37,6 +41,7 @@ Owner.prototype.disconnect = function () {
 };
 
 Owner.prototype._connect = function () {
+  this.clientId = this.getClientId();
   this._client || (this._client = new Client());
   this._socket || (this._socket = io(undefined, {query: 'role=owner'}));
   this._client.setSocket(this._socket);
@@ -61,7 +66,7 @@ Owner.prototype._intermediateRegister = function () {
 Owner.prototype._register = function () {
   return this._request('put:api/register', {
     groupId: this.groupId,
-    clientId: 'owner-clientid'
+    clientId: this.clientId,
   });
 };
 
@@ -92,14 +97,14 @@ Owner.prototype._addUserModel = function (userObject) {
     userModel = new Model(userObject.attributes);
     userModel.clientId = userObject.clientId;
     userModel.emitMessage = function (message) {
-      return self._sendCustomMessageToUser(this.clientId, message);
+      return self._emitCustomMessageToUser(this.clientId, message);
     };
     this._userModels[userObject.clientId] = userModel;
   }
   return userModel;
 };
 
-Owner.prototype._sendCustomMessageToUser = function (clientId, message) {
+Owner.prototype._emitCustomMessageToUser = function (clientId, message) {
   return this._request('post:api/user/custom_message/emit', {
     clientId: clientId,
     message: message,
@@ -145,6 +150,9 @@ Owner.prototype._attachSocketEvents = function () {
   });
   this._socket.on('connect', function () {
     self._onSocketConnect.apply(self, arguments);
+  });
+  this._socket.on('custom_message', function () {
+    self._onCustomMessage.apply(self, arguments);
   });
   this._socket.on('change:attributes', function () {
     self._onAttributesChangeMessage.apply(self, arguments);
@@ -214,6 +222,34 @@ Owner.prototype._onModelChange = function (changes) {
 
 };
 
+Owner.prototype._onCustomMessage = function (dataObject) {
+  var self = this,
+      fromClientId = dataObject.clientId,
+      message = dataObject.message;
+
+  this._getUserModel(dataObject.clientId).then(function (userModel) {
+    userModel.emit('custom_message', message);
+    self.emit('custom_message', userModel, message);
+  });
+};
+
+Owner.prototype._getUserModel = function (clientId) {
+  var self = this,
+      userModel = this._userModels[clientId],
+      deferred = $.Deferred();
+
+  if (userModel) {
+    deferred.resolve(userModel);
+  } else {
+    deferred = this.queryUser({
+      clientId: clientId
+    }, function (userModels) {
+      return $.Deferred().resolve(userModels[0]).promise();
+    });
+  }
+  return deferred.promise();
+};
+
 Owner.prototype._onAttributesChangeMessage = function (changeObject) {
   var index,
       clientId = changeObject.clientId,
@@ -254,7 +290,7 @@ Owner.prototype._onSocketDisconnect = function () {
 
 Owner.prototype.getClientId = function () {
   if (!this.clientId) {
-    this.clientId = BrowserStore.getItem(this._storeKeys.clientId);
+    this.clientId = this.options.clientId || BrowserStore.getItem(this._storeKeys.clientId);
     if (!this.clientId) {
       this.clientId = UID.guid();
       this._storeClientId(this.clientId);
