@@ -55,7 +55,16 @@
     // unsetAttribute('height');
     
     owner.queryUser({}, undefined).then(function (models) {
+      var model;
       console.log('Models:', models);
+      window.models = models;
+      if (models.length > 0) {
+        model = models[0];
+        window.model = model;
+        model.on('change', function () {
+          console.info('User model changed:', model.toJSON());
+        });
+      }
     });
 
     owner.queryUserCount({}).then(function (models) {

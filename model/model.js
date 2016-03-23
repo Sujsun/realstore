@@ -7,18 +7,9 @@ var mongoose = require('mongoose'),
     collectionName = 'Model';
 
 var ModelSchema = new mongoose.Schema({
-  clientId: { type: String },
+  clientId: { type: String, unique: true },
   groupId: { type: String },
   attributes: { type:mongoose.Schema.Types.Mixed },
-});
-
-/**
- * Making the clientId to be unique
- */
-ModelSchema.index({
-  clientId: 1,
-}, {
-  unique: 'Model with same clientId already exists',
 });
 
 ModelSchema.plugin(timestampPlugin);

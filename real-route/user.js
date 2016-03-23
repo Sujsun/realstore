@@ -89,6 +89,7 @@ module.exports = function (server) {
       socket.groupId = modelModel.get('groupId');
       socket.join('user_group:' + socket.groupId);
       Client.addSession(socket.clientId, socket);
+      server.socket.join('user_sessions:' + socket.clientId);
       send(null, modelModel.toObject());
       console.log('User client registered. ClientId:', modelModel.get('clientId'), '\tGroupId:', modelModel.get('groupId'));
     }).catch(function (err) {

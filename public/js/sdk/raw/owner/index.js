@@ -17,10 +17,8 @@ function Owner (groupId, options) {
   this.options.storeKey || (this.options.storeKey = 'realstore-clientid');
   this.options.storePrefix || (this.options.storePrefix = '');
   this.options.storePostfix || (this.options.storePostfix = '');
-  this.options.modelChangeThrottle || (this.options.modelChangeThrottle = 500);
   this.event = new Events();
   this._userModels = {};
-  this._generateStoreKeys();
 }
 
 Owner.prototype.connect = function () {
@@ -79,7 +77,49 @@ Owner.prototype.queryUserCount = function (query) {
 };
 
 Owner.prototype._queryUser = function (queryObj) {
-  return this._request('get:api/model', queryObj);
+  var self = this;
+  return this._request('get:api/model', queryObj).then(function (userObjects) {
+    var deferred = $.Deferred();
+    deferred.resolve(self._addUserModels(userObjects));
+    return deferred.promise();
+  });
+};
+
+Owner.prototype._addUserModel = function (userObject) {
+  var self = this,
+      userModel = this.getUserModel(userObject.clientId);
+  if (!userModel) {
+    userModel = new Model(userObject.attributes);
+    userModel.clientId = userObject.clientId;
+    userModel.emitMessage = function (message) {
+      return self._sendCustomMessageToUser(this.clientId, message);
+    };
+    this._userModels[userObject.clientId] = userModel;
+  }
+  return userModel;
+};
+
+Owner.prototype._sendCustomMessageToUser = function (clientId, message) {
+  return this._request('post:api/user/custom_message/emit', {
+    clientId: clientId,
+    message: message,
+  });
+};
+
+Owner.prototype._addUserModels = function (userObjects) {
+  var index,
+      userObject,
+      userModels = [];
+
+  for (index in userObjects) {
+    userObject = userObjects[index];
+    userModels.push(this._addUserModel(userObject));
+  }
+  return userModels;
+};
+
+Owner.prototype.getUserModel = function (clientId) {
+  return this._userModels[clientId];
 };
 
 Owner.prototype._queryUserCount = function (query) {
@@ -136,45 +176,6 @@ Owner.prototype._attachModelEvents = function () {
   }
 };
 
-Owner.prototype._onModelChangeThrottled = function (changes) {
-  var self = this,
-      change,
-      bufferChange,
-      changesBufferByAttributeName = this.model._changesBufferByAttributeName,
-      index;
-
-  for (index in changes) {
-    change = changes[index];
-    bufferChange = changesBufferByAttributeName[change.attributeName];
-    if (!bufferChange) {
-      changesBufferByAttributeName[change.attributeName] = change;
-    } else if (change.action === bufferChange.action) {
-      changesBufferByAttributeName[change.attributeName] = change;
-    } else {
-      if (change.action === 'change' && bufferChange.action === 'add') {
-        change.action = 'add';
-        changesBufferByAttributeName[change.attributeName] = change;
-      } else if (change.action === 'add' && bufferChange.action === 'remove') {
-        changesBufferByAttributeName[change.attributeName] = change;
-      } else if (change.action === 'remove' && bufferChange.action === 'add') {
-        delete changesBufferByAttributeName[change.attributeName];
-      } else {
-        changesBufferByAttributeName[change.attributeName] = change;
-      }
-    }
-  }
-
-  this.model._changesBufferByAttributeName = changesBufferByAttributeName;
-
-  console.log('this.model._changesBufferByAttributeName', this.model._changesBufferByAttributeName);
-
-  window.clearTimeout(this.throttledChangeTimeoutIndex);
-  this.throttledChangeTimeoutIndex = window.setTimeout(function () {
-    self._onModelChange(self._makeArray(self.model._changesBufferByAttributeName));
-    self.model._changesBufferByAttributeName = {};
-  }, this.options.modelChangeThrottle);
-};
-
 Owner.prototype._onModelChange = function (changes) {
   var index,
       changesLength = changes.length,
@@ -213,64 +214,25 @@ Owner.prototype._onModelChange = function (changes) {
 
 };
 
-Owner.prototype._groupBy = function (attributeName, array) {
+Owner.prototype._onAttributesChangeMessage = function (changeObject) {
   var index,
-      item,
-      groupedObject = {};
-  for (index in array) {
-    item = array[index];
-    groupedObject[item[attributeName]] = item;
-  }
-  return groupedObject;
-}
+      clientId = changeObject.clientId,
+      changes = changeObject.changes,
+      change,
+      userModel = this.getUserModel(clientId);
 
-Owner.prototype._makeArray = function (object) {
-  var key,
-      array = [];
-  for (key in object) {
-    array.push(object[key]);
-  }
-  return array;
-};
-
-Owner.prototype._onAttributesChangeMessage = function (data) {
-  var index,
-      key,
-      clientId = data.clientId,
-      changes = data.changes,
-      changesInDetail,
-      changeInDetail,
-      oldAttributes = this.model.toJSON(),
-      newAttributes;
-
-  if (changes.removedAttributes) {
-    for(index in changes.removedAttributes) {
-      delete this.model.attributes[changes.removedAttributes[index]];
+  if (userModel) {
+    if (changes.removedAttributes) {
+      userModel.unset(changes.removedAttributes);
     }
-  }
 
-  if (changes.addedAttributes) {
-    for(key in changes.addedAttributes) {
-      this.model.attributes[key] = changes.addedAttributes[key];
+    if (changes.addedAttributes) {
+      userModel.set(changes.addedAttributes);
     }
-  }
 
-  if (changes.changedAttributes) {
-    for(key in changes.changedAttributes) {
-      this.model.attributes[key] = changes.changedAttributes[key];
+    if (changes.changedAttributes) {
+      userModel.set(changes.changedAttributes);
     }
-  }
-
-  newAttributes = this.model.toJSON();
-
-  changesInDetail = this._findChanges(oldAttributes, newAttributes);
-
-  for(index in changesInDetail) {
-    changeInDetail = changesInDetail[index];
-    this.model.emit('server_change:' + changeInDetail.attributeName, changeInDetail);
-  }
-  if (changesInDetail.length !== 0) {
-    this.model.emit('server_change', changesInDetail);
   }
 };
 
@@ -288,22 +250,6 @@ Owner.prototype._onSocketConnect = function () {
 
 Owner.prototype._onSocketDisconnect = function () {
   this.emit('disconnect');
-};
-
-Owner.prototype._addAttributes = function (attributes) {
-  return this._request('put:api/model/attributes/add', attributes);
-};
-
-Owner.prototype._removeAttributes = function (attributeNames) {
-  return this._request('put:api/model/attributes/remove', attributeNames);
-};
-
-Owner.prototype._updateAttributes = function (attributes) {
-  return this._request('put:api/model/attributes/update', attributes);
-};
-
-Owner.prototype._clearAttributes = function () {
-  return this._request('put:api/model/attributes/clear');
 };
 
 Owner.prototype.getClientId = function () {

@@ -94,6 +94,9 @@ User.prototype._attachSocketEvents = function () {
   this._socket.on('connect', function () {
     self._onSocketConnect.apply(self, arguments);
   });
+  this._socket.on('custom_message', function () {
+    self._onCustomMessage.apply(self, arguments);
+  });
   this._socket.on('change:attributes', function (data) {
     self._onAttributesChangeMessage.apply(self, arguments);
   });
@@ -110,6 +113,10 @@ User.prototype._attachModelEvents = function () {
       self._onModelChangeThrottled.apply(self, arguments);
     });
   }
+};
+
+User.prototype._onCustomMessage = function (dataObject) {
+  this.model.emit('custom_message', dataObject);
 };
 
 User.prototype._onModelChangeThrottled = function (changes) {

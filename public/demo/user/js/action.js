@@ -35,6 +35,10 @@
     console.warn('Disconnected from serer. :(');
   });
 
+  user.model.on('custom_message', function (dataObject) {
+    console.info('Received custom message:', dataObject);
+  });
+
   connect().then(function () {
     setAttribute({
       name: 'Sundarasan',

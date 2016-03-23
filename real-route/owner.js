@@ -57,4 +57,17 @@ module.exports = function (server) {
     console.log('Owner client registered. GroupId:', server.socket.groupId);
   });
 
+  server.use('post:api/user/custom_message/emit', function (dataObject, send) {
+    var clientId = dataObject.clientId,
+        message = dataObject.message;
+
+    emitToCustomMessageUser(clientId, message);
+  });
+
+  function emitToCustomMessageUser (clientId, message) {
+    server.socket.broadcast.to('user_sessions:' + clientId).emit('custom_message', message);
+  }
+
+  server.use
+
 };
